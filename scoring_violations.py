@@ -313,19 +313,27 @@ def pedagogical_penalties(schedule, data, lookups, collect=False):
                     if collect:
                         violations.append({"type": "ped_not_consecutive", "detail": f"{gname(gid)}: {sname(a)} ו{sname(b)} צמודים ביום {DAY_NAMES.get(day, day)}", "penalty": pen, "severity": "soft"})
 
-        elif ctype == "min_gap":
-            # UI collects no subject → applies to EVERY subject: a subject with
-            # exactly 2 lessons in a class-day that are not adjacent is penalised.
+        elif ctype == "min_gap" and a is not None:
+            b_eff = b if b is not None else a
+            req = n if n is not None else 0
             for (gid, day), items in group_day_items.items():
-                hours_by_subj = {}
-                for sid, h in items:
-                    hours_by_subj.setdefault(sid, []).append(h)
-                for sid, hs in hours_by_subj.items():
-                    if len(hs) == 2 and abs(hs[0] - hs[1]) != 1:
-                        pen = PED_MIN_GAP_PENALTY * w
-                        total += pen
-                        if collect:
-                            violations.append({"type": "ped_min_gap", "detail": f"{gname(gid)} / {sname(sid)}: 2 שיעורים לא צמודים ביום {DAY_NAMES.get(day, day)}", "penalty": pen, "severity": "soft"})
+                a_hours = [h for sid, h in items if sid == a]
+                b_hours = [h for sid, h in items if sid == b_eff]
+                if a == b_eff:
+                    prs = [(a_hours[i], a_hours[j]) for i in range(len(a_hours)) for j in range(i + 1, len(a_hours))]
+                else:
+                    prs = [(ha, hb) for ha in a_hours for hb in b_hours]
+                bad = 0
+                for ha, hb in prs:
+                    sep = abs(ha - hb) - 1          # empty periods between the two lessons
+                    if (req == 0 and sep != 0) or (req > 0 and sep < req):
+                        bad += 1
+                if bad:
+                    pen = bad * PED_MIN_GAP_PENALTY * w
+                    total += pen
+                    if collect:
+                        txt = "צמודים" if req == 0 else f"בהפרש {req}+ שעות"
+                        violations.append({"type": "ped_min_gap", "detail": f"{gname(gid)} / {sname(a)}↔{sname(b_eff)}: לא {txt} ({bad} ביום {DAY_NAMES.get(day, day)})", "penalty": pen, "severity": "soft"})
 
     return total, violations
 
