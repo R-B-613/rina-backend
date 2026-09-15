@@ -135,3 +135,15 @@ BALANCE_TOLERANCE = 2  # a spread of up to 2 hours between days is free
 # grade_schedule_limits (managed from the admin UI). Grades with no row have
 # no cap (fail-safe). Soft on purpose — keeps tight schedules feasible.
 GRADE_MAX_PER_DAY_PENALTY_PER_HOUR = 100
+
+
+# ---------------------------------------------------------------------------
+# Pedagogical constraints (admin UI: pedagogical_constraints). All SOFT.
+# Each is multiplied by the row's own `weight` (default 1). Tunable here.
+# ---------------------------------------------------------------------------
+PED_MAX_PER_DAY_PENALTY = 175       # per excess lesson of the subject, per class/day
+PED_NOT_LAST_PENALTY = 75           # per lesson of the subject in the day's last period
+PED_MORNING_ONLY_PENALTY = 75       # per lesson of the subject after the morning threshold
+PED_MORNING_ONLY_THRESHOLD = 4      # lessons after this period count as "afternoon"
+PED_NOT_CONSECUTIVE_PENALTY = 150   # per subject-A lesson adjacent to a subject-B lesson
+PED_MIN_GAP_PENALTY = 150           # per subject with 2 non-adjacent lessons in a class/day
