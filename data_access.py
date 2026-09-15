@@ -160,6 +160,15 @@ def fetch_all_data():
             """)
             data["grade_schedule_limits"] = cursor.fetchall()
 
+                cursor.execute("""
+                SELECT id, constraint_type, subject_a_id, subject_b_id,
+                       numeric_value, weight
+                FROM pedagogical_constraints
+                WHERE is_active = true
+                ORDER BY id;
+            """)
+            data["pedagogical_constraints"] = cursor.fetchall()
+
     finally:
         conn.close()
 
