@@ -189,6 +189,111 @@ def student_structure_penalties(schedule, data, lookups, collect=False):
     return total, violations
 
 
+def pedagogical_penalties(schedule, data, lookups, collect=False):
+    """
+    Admin-defined pedagogical constraints (pedagogical_constraints table,
+    managed from the 'הגדרות מוסד' screen). ALL SOFT. Only is_active rows
+    reach here (filtered in data_access.fetch_all_data). Each penalty is
+    multiplied by the row's own `weight` (default 1).
+    Types: max_per_day, not_last, morning_only, not_consecutive, min_gap.
+    """
+    from scoring_config import (
+        PED_MAX_PER_DAY_PENALTY, PED_NOT_LAST_PENALTY,
+        PED_MORNING_ONLY_PENALTY, PED_MORNING_ONLY_THRESHOLD,
+        PED_NOT_CONSECUTIVE_PENALTY, PED_MIN_GAP_PENALTY,
+    )
+
+    constraints = data.get("pedagogical_constraints", [])
+    total = 0.0
+    violations = [] if collect else None
+    if not constraints:
+        return total, violations
+
+    requirement_by_id = lookups["requirement_by_id"]
+    timeslot_by_id = lookups["timeslot_by_id"]
+    group_by_id = lookups["group_by_id"]
+    subject_by_id = lookups["subject_by_id"]
+
+    def gname(gid):
+        return group_by_id.get(gid, {}).get("group_name", f"קבוצה {gid}")
+    def sname(sid):
+        return subject_by_id.get(sid, {}).get("subject_name", f"מקצוע {sid}")
+
+    # Per (group, day): list of (subject_id, hour) actually scheduled.
+    group_day_items = {}
+    for ta in data["teacher_assignments"]:
+        req = requirement_by_id[ta["cur_requirement_id"]]
+        gid = req["student_group_id"]
+        sid = req["subject_id"]
+        for t in schedule[ta["id"]]:
+            ts = timeslot_by_id[t]
+            group_day_items.setdefault((gid, ts["day_of_week"]), []).append((sid, ts["hour_of_day"]))
+
+    for c in constraints:
+        ctype = c["constraint_type"]
+        a = c.get("subject_a_id")
+        b = c.get("subject_b_id")
+        n = c.get("numeric_value")
+        w = c.get("weight") or 1
+
+        if ctype == "max_per_day" and a is not None and n is not None:
+            for (gid, day), items in group_day_items.items():
+                cnt = sum(1 for sid, h in items if sid == a)
+                if cnt > n:
+                    pen = (cnt - n) * PED_MAX_PER_DAY_PENALTY * w
+                    total += pen
+                    if collect:
+                        violations.append({"type": "ped_max_per_day", "detail": f"{gname(gid)} / {sname(a)}: {cnt} שיעורים ביום {DAY_NAMES.get(day, day)}, מעל המותר ({n})", "penalty": pen, "severity": "soft"})
+
+        elif ctype == "not_last" and a is not None:
+            for (gid, day), items in group_day_items.items():
+                if not items:
+                    continue
+                last = max(h for sid, h in items)
+                bad = sum(1 for sid, h in items if sid == a and h == last)
+                if bad:
+                    pen = bad * PED_NOT_LAST_PENALTY * w
+                    total += pen
+                    if collect:
+                        violations.append({"type": "ped_not_last", "detail": f"{gname(gid)} / {sname(a)}: בשיעור האחרון ביום {DAY_NAMES.get(day, day)}", "penalty": pen, "severity": "soft"})
+
+        elif ctype == "morning_only" and a is not None:
+            for (gid, day), items in group_day_items.items():
+                bad = sum(1 for sid, h in items if sid == a and h > PED_MORNING_ONLY_THRESHOLD)
+                if bad:
+                    pen = bad * PED_MORNING_ONLY_PENALTY * w
+                    total += pen
+                    if collect:
+                        violations.append({"type": "ped_morning_only", "detail": f"{gname(gid)} / {sname(a)}: {bad} שיעורים אחרי שעה {PED_MORNING_ONLY_THRESHOLD} ביום {DAY_NAMES.get(day, day)}", "penalty": pen, "severity": "soft"})
+
+        elif ctype == "not_consecutive" and a is not None and b is not None:
+            for (gid, day), items in group_day_items.items():
+                a_hours = [h for sid, h in items if sid == a]
+                b_hours = set(h for sid, h in items if sid == b)
+                pairs = sum(1 for h in a_hours if (h - 1) in b_hours or (h + 1) in b_hours)
+                if pairs:
+                    pen = pairs * PED_NOT_CONSECUTIVE_PENALTY * w
+                    total += pen
+                    if collect:
+                        violations.append({"type": "ped_not_consecutive", "detail": f"{gname(gid)}: {sname(a)} ו{sname(b)} צמודים ביום {DAY_NAMES.get(day, day)}", "penalty": pen, "severity": "soft"})
+
+        elif ctype == "min_gap":
+            # UI collects no subject → applies to EVERY subject: a subject with
+            # exactly 2 lessons in a class-day that are not adjacent is penalised.
+            for (gid, day), items in group_day_items.items():
+                hours_by_subj = {}
+                for sid, h in items:
+                    hours_by_subj.setdefault(sid, []).append(h)
+                for sid, hs in hours_by_subj.items():
+                    if len(hs) == 2 and abs(hs[0] - hs[1]) != 1:
+                        pen = PED_MIN_GAP_PENALTY * w
+                        total += pen
+                        if collect:
+                            violations.append({"type": "ped_min_gap", "detail": f"{gname(gid)} / {sname(sid)}: 2 שיעורים לא צמודים ביום {DAY_NAMES.get(day, day)}", "penalty": pen, "severity": "soft"})
+
+    return total, violations
+
+
 def _day_hour(timeslot_by_id, t):
     ts = timeslot_by_id.get(t)
     if ts is None:
