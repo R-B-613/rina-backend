@@ -180,6 +180,12 @@ def student_structure_penalties(schedule, data, lookups, collect=False):
             if collect:
                 violations.append({"type": "daily_balance", "detail": f"{gname_of(gid)}: פער של {spread} שעות בין היום הארוך לקצר", "penalty": pen, "severity": "soft"})
 
+    # Admin-defined pedagogical constraints (soft) — flows to GA, HC and the report
+    _ptot, _pvios = pedagogical_penalties(schedule, data, lookups, collect=collect)
+    total += _ptot
+    if collect and _pvios:
+        violations.extend(_pvios)
+
     return total, violations
 
 
