@@ -37,6 +37,40 @@ def grade_of(group_name):
     rest = group_name.replace("כיתה", "").strip()
     return GRADE_LETTERS.get(rest[0]) if rest else None
 
+def _parse_clock_to_hour(s):
+    """'09:00' / '09:00:00' / time(9,0) -> 9. None on failure."""
+    try:
+        return int(str(s).split(":")[0])
+    except (ValueError, AttributeError, IndexError):
+        return None
+
+
+def _dismissal_by_grade(data):
+    """
+    Build {grade: last_allowed_period} from admin school settings
+    (system_requirements.grade_end_times), per the rule:
+        last_period = end_hour - start_hour   (both from the clock strings)
+    An end that reads earlier than start (e.g. '01:00' meaning 1 PM) is
+    treated as PM (+12). Grades the admin didn't set get DEFAULT_DISMISSAL
+    (period 8 = no early-dismissal penalty).
+    """
+    from scoring_config import DEFAULT_DISMISSAL
+    sr_list = data.get("system_requirements") or []
+    sr = sr_list[0] if sr_list else {}
+    start_h = _parse_clock_to_hour(sr.get("start_time")) or 8
+    ends = sr.get("grade_end_times") or {}
+    result = {}
+    for grade in range(1, 7):
+        end_h = _parse_clock_to_hour(ends.get(str(grade)))
+        if end_h is not None:
+            if end_h <= start_h:          # '01:00' entered for 1 PM
+                end_h += 12
+            last_period = end_h - start_h
+            if last_period >= 1:
+                result[grade] = last_period
+                continue
+        result[grade] = DEFAULT_DISMISSAL
+    return result
 
 def student_structure_penalties(schedule, data, lookups, collect=False):
     """
@@ -94,6 +128,8 @@ def student_structure_penalties(schedule, data, lookups, collect=False):
         for row in data.get("grade_schedule_limits", [])
     }
 
+    dismissal_map = _dismissal_by_grade(data)
+
     for (gid, day), hours in group_day_hours.items():
         hs = sorted(set(hours))
         if not hs:
@@ -118,7 +154,7 @@ def student_structure_penalties(schedule, data, lookups, collect=False):
         # Per-grade dismissal: lessons past the grade's last allowed period (strong-soft)
         grade = grade_of(gname_of(gid))
         if grade is not None:
-            dismissal = GRADE_DISMISSAL.get(grade, DEFAULT_DISMISSAL)
+            dismissal = dismissal_map.get(grade, DEFAULT_DISMISSAL)
             late = [h for h in hs if h > dismissal]
             if late:
                 pen = len(late) * DISMISSAL_PENALTY_PER_HOUR
