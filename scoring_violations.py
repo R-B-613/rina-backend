@@ -94,9 +94,6 @@ def student_structure_penalties(schedule, data, lookups, collect=False):
         DEFAULT_DISMISSAL,
         DISMISSAL_PENALTY_PER_HOUR,
         NO_EMPTY_DAY_PENALTY,
-        HOLY_MORNING_PENALTY,
-        HOLY_MORNING_THRESHOLD,
-        category_of,
         BALANCE_PENALTY_PER_HOUR,
         BALANCE_TOLERANCE,
         GRADE_MAX_PER_DAY_PENALTY_PER_HOUR,
@@ -185,21 +182,6 @@ def student_structure_penalties(schedule, data, lookups, collect=False):
                 total += NO_EMPTY_DAY_PENALTY
                 if collect:
                     violations.append({"type": "empty_day", "detail": f"{gname_of(gid)}: יום ריק לחלוטין ({DAY_NAMES.get(day, day)})", "penalty": NO_EMPTY_DAY_PENALTY, "severity": "hard"})
-
-    # Holy subjects prefer the morning: a holy lesson placed after the threshold period (soft)
-    subject_by_id = lookups["subject_by_id"]
-    for ta in data["teacher_assignments"]:
-        req = requirement_by_id[ta["cur_requirement_id"]]
-        subj_name = subject_by_id.get(req["subject_id"], {}).get("subject_name", "")
-        if category_of(subj_name) != "holy":
-            continue
-        gid = req["student_group_id"]
-        for t in schedule[ta["id"]]:
-            ts = timeslot_by_id[t]
-            if ts["hour_of_day"] > HOLY_MORNING_THRESHOLD:
-                total += HOLY_MORNING_PENALTY
-                if collect:
-                    violations.append({"type": "holy_afternoon", "detail": f"{gname_of(gid)} / {subj_name}: לימוד קודש אחרי שעה {HOLY_MORNING_THRESHOLD} ({DAY_NAMES.get(ts['day_of_week'], ts['day_of_week'])} שעה {ts['hour_of_day']})", "penalty": HOLY_MORNING_PENALTY, "severity": "soft"})
 
     # Balanced daily load: penalise big day-to-day swings in a class's lesson count (soft)
     group_daily_counts = {}
@@ -543,13 +525,7 @@ def score_genetic_schedule_with_violations(schedule, data, lookups):
             ts = timeslot_by_id[t]
             key = (req["student_group_id"], req["subject_id"], ts["day_of_week"])
             group_subject_day_counts[key] = group_subject_day_counts.get(key, 0) + 1
-    for (group_id, subject_id, day), count in group_subject_day_counts.items():
-        if count > 1:
-            pen = (count - 1) * SUBJECT_DISTRIBUTION_PENALTY_PER_EXTRA_HOUR
-            total_penalty += pen
-            gname = group_by_id.get(group_id, {}).get("group_name", "קבוצה")
-            subj = subject_by_id.get(subject_id, {}).get("subject_name", "מקצוע")
-            violations.append({"type": "subject_distribution", "detail": f"{gname} / {subj}: {count} שיעורים באותו יום ({DAY_NAMES.get(day, day)})", "penalty": pen, "severity": "soft"})
+      # subject_distribution הוסר לבקשת המנהל — הפיזור נשלט דרך "מקסימום ליום" בהגדרות מוסד.
 
     # ---- Student structure: gaps, start-at-1 (hard) + young grades late (soft) ----
     _stot, _svios = student_structure_penalties(schedule, data, lookups, collect=True)
