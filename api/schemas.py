@@ -7,7 +7,7 @@ file makes the entire API surface readable at a glance.
 These are written for Pydantic v2 (the version FastAPI installs today).
 """
 
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 from pydantic import BaseModel, Field
@@ -68,3 +68,17 @@ class GenerationStatusResponse(BaseModel):
     # runtime/memory metrics. On failure, error holds the message.
     result: Optional[dict] = None
     error: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Manual schedule editing (admin drag & drop)
+# ---------------------------------------------------------------------------
+
+class ScheduleEntryEdit(BaseModel):
+    tea_assignment_id: int
+    timeslot_id: int
+    room_id: Optional[int] = None
+
+
+class ScheduleEditRequest(BaseModel):
+    entries: List[ScheduleEntryEdit]
