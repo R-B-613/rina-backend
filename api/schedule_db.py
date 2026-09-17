@@ -64,12 +64,18 @@ def get_schedule_entries(run_id: int, teacher_id: int = None):
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             query = """
                 SELECT
+                    s.id                AS id,
+                    s.timeslot_id       AS timeslot_id,
+                    s.tea_assignment_id AS tea_assignment_id,
+                    s.room_id           AS room_id,
                     t.day_of_week,
                     t.hour_of_day,
                     te.id            AS teacher_id,
                     te.first_name    AS teacher_first_name,
                     te.last_name     AS teacher_last_name,
+                    sub.id           AS subject_id,
                     sub.subject_name,
+                    sg.id            AS group_id,
                     sg.group_name,
                     r.room_name
                 FROM schedule s
