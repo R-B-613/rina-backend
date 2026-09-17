@@ -12,6 +12,8 @@ from api.schedule_db import (
     get_schedule_entries,
     publish_run,
 )
+from api.edit_db import preview_violations, save_run_entries
+from api.schemas import ScheduleEditRequest
 
 router = APIRouter(prefix="/schedule", tags=["schedule"])
 
@@ -53,3 +55,25 @@ def current_violations(admin: dict = Depends(get_current_admin)):
         "run": {"id": run["id"], "algorithm": run["algorithm"], "score": run["score"], "is_published": run["is_published"]},
         "violations": run.get("violations") or [],
     }
+
+
+@router.post("/preview-violations")
+def preview_schedule_violations(payload: ScheduleEditRequest, admin: dict = Depends(get_current_admin)):
+    """Score a proposed (unsaved) schedule and return its violations."""
+    entries = [e.model_dump() for e in payload.entries]
+    score, violations = preview_violations(entries)
+    return {"score": score, "violations": violations}
+
+
+@router.put("/run/{run_id}/entries")
+def save_schedule_edits(run_id: int, payload: ScheduleEditRequest, admin: dict = Depends(get_current_admin)):
+    """Persist an edited schedule. Only the current selected run may be edited."""
+    current = get_current_run()
+    if current is None or current["id"] != run_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only the current schedule can be edited",
+        )
+    entries = [e.model_dump() for e in payload.entries]
+    score, violations = save_run_entries(run_id, entries)
+    return {"detail": "saved", "run_id": run_id, "score": score, "violations": violations}
