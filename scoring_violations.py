@@ -37,39 +37,66 @@ def grade_of(group_name):
     rest = group_name.replace("כיתה", "").strip()
     return GRADE_LETTERS.get(rest[0]) if rest else None
 
-def _parse_clock_to_hour(s):
-    """'09:00' / '09:00:00' / time(9,0) -> 9. None on failure."""
+def _parse_clock_to_min(s):
+    """'09:00' / '09:00:00' / time(9,0) -> minutes since midnight. None on failure."""
     try:
-        return int(str(s).split(":")[0])
+        parts = str(s).split(":")
+        return int(parts[0]) * 60 + int(parts[1])
     except (ValueError, AttributeError, IndexError):
         return None
 
 
+LESSON_MINUTES = 45  # a teaching period; must match the School-Settings preview
+
+
+def _periods_until(start_min, end_min, breaks):
+    """How many 45-min lessons fit between start and end, inserting the
+    configured breaks between lessons — the SAME walk the frontend uses."""
+    if start_min is None or end_min is None or end_min <= start_min:
+        return None
+    by_after = {}
+    for b in (breaks or []):
+        try:
+            by_after[int(b["after_lesson"])] = int(b["duration_minutes"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    t, n = start_min, 0
+    while t + LESSON_MINUTES <= end_min:
+        n += 1
+        t += LESSON_MINUTES
+        dur = by_after.get(n)
+        if dur is not None and t + dur + LESSON_MINUTES <= end_min:
+            t += dur
+    return n
+
+
 def _dismissal_by_grade(data):
     """
-    Build {grade: last_allowed_period} from admin school settings
-    (system_requirements.grade_end_times), per the rule:
-        last_period = end_hour - start_hour   (both from the clock strings)
-    An end that reads earlier than start (e.g. '01:00' meaning 1 PM) is
-    treated as PM (+12). Grades the admin didn't set get DEFAULT_DISMISSAL
-    (period 8 = no early-dismissal penalty).
+    {grade: last_allowed_period} from admin settings (start_time,
+    grade_end_times, breaks). The last period is the NUMBER of 45-min
+    lessons that fit — breaks included — NOT the raw clock-hour difference.
     """
     from scoring_config import DEFAULT_DISMISSAL
     sr_list = data.get("system_requirements") or []
     sr = sr_list[0] if sr_list else {}
-    start_h = _parse_clock_to_hour(sr.get("start_time")) or 8
+    start_min = _parse_clock_to_min(sr.get("start_time"))
+    if start_min is None:
+        start_min = 8 * 60
+    breaks = sr.get("breaks") or []
+    if isinstance(breaks, str):
+        import json
+        try:
+            breaks = json.loads(breaks)
+        except ValueError:
+            breaks = []
     ends = sr.get("grade_end_times") or {}
     result = {}
     for grade in range(1, 7):
-        end_h = _parse_clock_to_hour(ends.get(str(grade)))
-        if end_h is not None:
-            if end_h <= start_h:          # '01:00' entered for 1 PM
-                end_h += 12
-            last_period = end_h - start_h
-            if last_period >= 1:
-                result[grade] = last_period
-                continue
-        result[grade] = DEFAULT_DISMISSAL
+        end_min = _parse_clock_to_min(ends.get(str(grade)))
+        if end_min is not None and end_min <= start_min:   # '01:00' = 1 PM
+            end_min += 12 * 60
+        periods = _periods_until(start_min, end_min, breaks)
+        result[grade] = periods if (periods and periods >= 1) else DEFAULT_DISMISSAL
     return result
 
 def student_structure_penalties(schedule, data, lookups, collect=False):
