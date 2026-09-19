@@ -170,7 +170,7 @@ def fetch_all_data():
             data["pedagogical_constraints"] = cursor.fetchall()
 
             cursor.execute("""
-                SELECT active_days, start_time, breaks, grade_end_times
+                SELECT active_days, start_time, friday_end_time, breaks, grade_end_times
                 FROM system_requirements
                 LIMIT 1;
             """)
