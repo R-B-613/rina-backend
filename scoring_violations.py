@@ -99,6 +99,46 @@ def _dismissal_by_grade(data):
         result[grade] = periods if (periods and periods >= 1) else DEFAULT_DISMISSAL
     return result
 
+def build_structure_limits(data):
+    """
+    From admin settings → (active_days:set[int], ceiling:dict[(grade,day)->max_period]).
+    ceiling = number of 45-min lessons (breaks included) that fit from start_time
+    to that grade's end time; Friday (day 6) uses friday_end_time for all grades.
+    The single source of truth for "which (grade,day,hour) is allowed", shared by
+    CSP (structural) and GA/HC (scored).
+    """
+    from scoring_config import DEFAULT_DISMISSAL
+    sr_list = data.get("system_requirements") or []
+    sr = sr_list[0] if sr_list else {}
+    start_min = _parse_clock_to_min(sr.get("start_time"))
+    if start_min is None:
+        start_min = 8 * 60
+    breaks = sr.get("breaks") or []
+    if isinstance(breaks, str):
+        import json
+        try:
+            breaks = json.loads(breaks)
+        except ValueError:
+            breaks = []
+    raw_days = sr.get("active_days") or [1, 2, 3, 4, 5, 6]
+    active_days = {int(d) for d in raw_days}
+    ends = sr.get("grade_end_times") or {}
+    friday_min = _parse_clock_to_min(sr.get("friday_end_time"))
+    if friday_min is not None and friday_min <= start_min:
+        friday_min += 12 * 60
+    friday_cap = _periods_until(start_min, friday_min, breaks) if friday_min is not None else None
+    ceiling = {}
+    for grade in range(1, 7):
+        end_min = _parse_clock_to_min(ends.get(str(grade)))
+        if end_min is not None and end_min <= start_min:
+            end_min += 12 * 60
+        wd_cap = _periods_until(start_min, end_min, breaks)
+        wd_cap = wd_cap if (wd_cap and wd_cap >= 1) else DEFAULT_DISMISSAL
+        fr_cap = friday_cap if (friday_cap and friday_cap >= 1) else DEFAULT_DISMISSAL
+        for day in range(1, 7):
+            ceiling[(grade, day)] = fr_cap if day == 6 else wd_cap
+    return active_days, ceiling
+
 def student_structure_penalties(schedule, data, lookups, collect=False):
     """
     Student-focused structural rules, shared by ALL three algorithms so the
@@ -152,7 +192,7 @@ def student_structure_penalties(schedule, data, lookups, collect=False):
         for row in data.get("grade_schedule_limits", [])
     }
 
-    dismissal_map = _dismissal_by_grade(data)
+    active_days, ceiling = build_structure_limits(data)
 
     for (gid, day), hours in group_day_hours.items():
         hs = sorted(set(hours))
@@ -175,16 +215,22 @@ def student_structure_penalties(schedule, data, lookups, collect=False):
             if collect:
                 violations.append({"type": "student_late_start", "detail": f"{gname_of(gid)}: לא מתחיל בשעה 1 ביום {DAY_NAMES.get(day, day)} (מתחיל בשעה {first})", "penalty": pen, "severity": "hard"})
 
-        # Per-grade dismissal: lessons past the grade's last allowed period (strong-soft)
+        # HARD: admin day structure — no lessons on an inactive day, and none past
+        # the grade's end-of-day (Friday uses friday_end_time). 45-min + breaks aware.
         grade = grade_of(gname_of(gid))
-        if grade is not None:
-            dismissal = dismissal_map.get(grade, DEFAULT_DISMISSAL)
-            late = [h for h in hs if h > dismissal]
+        if day not in active_days:
+            pen = len(hs) * HARD_CONSTRAINT_PENALTY
+            total += pen
+            if collect:
+                violations.append({"type": "inactive_day", "detail": f"{gname_of(gid)}: {len(hs)} שיעורים ביום שאינו יום לימוד ({DAY_NAMES.get(day, day)})", "penalty": pen, "severity": "hard"})
+        elif grade is not None:
+            cap = ceiling.get((grade, day), DEFAULT_DISMISSAL)
+            late = [h for h in hs if h > cap]
             if late:
-                pen = len(late) * DISMISSAL_PENALTY_PER_HOUR
+                pen = len(late) * HARD_CONSTRAINT_PENALTY
                 total += pen
                 if collect:
-                    violations.append({"type": "grade_dismissal", "detail": f"{gname_of(gid)} (שכבה {grade}): {len(late)} שיעורים אחרי שעת הסיום ({dismissal}) ביום {DAY_NAMES.get(day, day)}", "penalty": pen, "severity": "soft"})
+                    violations.append({"type": "grade_dismissal", "detail": f"{gname_of(gid)} (שכבה {grade}): {len(late)} שיעורים אחרי שעת הסיום ({cap}) ביום {DAY_NAMES.get(day, day)}", "penalty": pen, "severity": "hard"})
 
         # Admin-defined max lessons per day for this grade (strong-soft).
         # hs already holds this class's distinct lesson-periods for the day.
@@ -198,7 +244,7 @@ def student_structure_penalties(schedule, data, lookups, collect=False):
                     violations.append({"type": "grade_max_per_day", "detail": f"{gname_of(gid)} (שכבה {grade}): {len(hs)} שיעורים ביום {DAY_NAMES.get(day, day)}, מעל המקסימום ({cap})", "penalty": pen, "severity": "soft"})
 
     # No empty day: every class must have at least one lesson on each school day (hard)
-    school_days = sorted({ts["day_of_week"] for ts in data["timeslots"]})
+    school_days = sorted(active_days)
     all_group_ids = {
         requirement_by_id[ta["cur_requirement_id"]]["student_group_id"]
         for ta in data["teacher_assignments"]
