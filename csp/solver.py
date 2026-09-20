@@ -47,7 +47,7 @@ TODO (explicitly skipped for v1, per project decision):
 """
 
 from ortools.sat.python import cp_model
-from scoring_violations import score_genetic_schedule_with_violations, grade_of
+from scoring_violations import score_genetic_schedule_with_violations, grade_of, build_structure_limits
 
 from scoring_config import (
     HARD_CONSTRAINT_PENALTY,
@@ -147,6 +147,7 @@ def _add_student_contiguity_constraints(model, schedule_vars, data, lookups, tim
     busy(p) <= busy(p-1) enforces BOTH 'start at 1' AND 'no gaps' at once.
     """
     assignments_by_group = lookups["assignments_by_group"]
+    active_days, _ceiling = build_structure_limits(data)
     ts_by_day_hour = {}
     hours_by_day = {}
     for ts in timeslots:
@@ -155,6 +156,8 @@ def _add_student_contiguity_constraints(model, schedule_vars, data, lookups, tim
 
     for group_id, assignment_ids in assignments_by_group.items():
         for day, hours in hours_by_day.items():
+            if day not in active_days:
+                continue
             hs = sorted(hours)
             for i in range(1, len(hs)):
                 cur = sum(schedule_vars[(a_id, ts_by_day_hour[(day, hs[i])])] for a_id in assignment_ids)
@@ -263,6 +266,28 @@ def _add_structural_hard_constraints(model, schedule_vars, data, lookups, timesl
                     == schedule_vars[(other_id, ts["id"])]
                 )
 
+def _add_admin_structure_constraints(model, schedule_vars, data, lookups, timeslots):
+    """
+    HARD: honour the admin's day structure exactly (School Settings), by forcing
+    the matching decision variables to 0 — structurally impossible, not penalised.
+      - No lesson on a day outside active_days.
+      - No lesson past a grade's end-of-day period; Friday uses friday_end_time.
+        Period count = 45-min lessons + breaks (build_structure_limits).
+    """
+    from scoring_config import DEFAULT_DISMISSAL
+    active_days, ceiling = build_structure_limits(data)
+    requirement_by_id = lookups["requirement_by_id"]
+    group_by_id = lookups["group_by_id"]
+    for ta in data["teacher_assignments"]:
+        gid = requirement_by_id[ta["cur_requirement_id"]]["student_group_id"]
+        grade = grade_of(group_by_id.get(gid, {}).get("group_name"))
+        for ts in timeslots:
+            day, hour = ts["day_of_week"], ts["hour_of_day"]
+            allowed = day in active_days
+            if allowed and grade is not None:
+                allowed = hour <= ceiling.get((grade, day), DEFAULT_DISMISSAL)
+            if not allowed:
+                model.Add(schedule_vars[(ta["id"], ts["id"])] == 0)
 
 def _compute_penalty_score(solver, schedule_vars, data, lookups, timeslots):
     """
@@ -494,6 +519,7 @@ def run_csp(data: dict) -> dict:
 
     _add_structural_hard_constraints(model, schedule_vars, data, lookups, timeslots)
     _add_student_contiguity_constraints(model, schedule_vars, data, lookups, timeslots)
+    _add_admin_structure_constraints(model, schedule_vars, data, lookups, timeslots)
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = CSP_MAX_SOLVE_SECONDS
