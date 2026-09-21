@@ -549,18 +549,22 @@ def score_genetic_schedule_with_violations(schedule, data, lookups):
 
     # ---- teacher_preferences (soft) ----
     for teacher_id, assignment_ids in assignments_by_teacher.items():
+        total_hours = sum(len(schedule[a_id]) for a_id in assignment_ids)
+        # Workload band: admin-set on the teacher record (min_hours/max_hours).
+        trec = teacher_by_id.get(teacher_id) or {}
+        tmin, tmax = trec.get("min_hours"), trec.get("max_hours")
+        if tmin is not None and total_hours < tmin:
+            pen = (tmin - total_hours) * OUTSIDE_HOURS_RANGE_PENALTY_PER_HOUR
+            total_penalty += pen
+            violations.append({"type": "hours_range", "detail": f"{teacher_name(teacher_id)}: {total_hours} שעות, מתחת למינימום ({tmin})", "penalty": pen, "severity": "soft"})
+        if tmax is not None and total_hours > tmax:
+            pen = (total_hours - tmax) * OUTSIDE_HOURS_RANGE_PENALTY_PER_HOUR
+            total_penalty += pen
+            violations.append({"type": "hours_range", "detail": f"{teacher_name(teacher_id)}: {total_hours} שעות, מעל המקסימום ({tmax})", "penalty": pen, "severity": "soft"})
+
         prefs = preferences_by_teacher.get(teacher_id)
         if prefs is None:
             continue
-        total_hours = sum(len(schedule[a_id]) for a_id in assignment_ids)
-        if prefs["min_hours"] is not None and total_hours < prefs["min_hours"]:
-            pen = (prefs["min_hours"] - total_hours) * OUTSIDE_HOURS_RANGE_PENALTY_PER_HOUR
-            total_penalty += pen
-            violations.append({"type": "hours_range", "detail": f"{teacher_name(teacher_id)}: {total_hours} שעות, מתחת למינימום ({prefs['min_hours']})", "penalty": pen, "severity": "soft"})
-        if prefs["max_hours"] is not None and total_hours > prefs["max_hours"]:
-            pen = (total_hours - prefs["max_hours"]) * OUTSIDE_HOURS_RANGE_PENALTY_PER_HOUR
-            total_penalty += pen
-            violations.append({"type": "hours_range", "detail": f"{teacher_name(teacher_id)}: {total_hours} שעות, מעל המקסימום ({prefs['max_hours']})", "penalty": pen, "severity": "soft"})
 
         teacher_day_hours = {}
         for a_id in assignment_ids:
