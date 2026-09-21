@@ -115,7 +115,7 @@ def fetch_all_data():
             data["student_groups"] = cursor.fetchall()
 
             cursor.execute("""
-                SELECT id, first_name, last_name, weekly_hours_quota,
+                SELECT id, first_name, last_name, min_hours, max_hours,
                        is_admin, email
                 FROM teachers
                 ORDER BY id;
