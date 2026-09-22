@@ -119,6 +119,7 @@ def _build_lookup_maps(data: dict):
         "assignments_by_group": assignments_by_group,
         "constraint_by_teacher_timeslot": constraint_by_teacher_timeslot,
         "preferences_by_teacher": preferences_by_teacher,
+        "teacher_by_id": {t["id"]: t for t in data["teachers"]},
         "timeslot_by_id": timeslot_by_id,
         "subject_by_id": subject_by_id,
         "group_by_id": group_by_id,
@@ -298,6 +299,7 @@ def _compute_penalty_score(solver, schedule_vars, data, lookups, timeslots):
     """
     constraint_by_teacher_timeslot = lookups["constraint_by_teacher_timeslot"]
     preferences_by_teacher = lookups["preferences_by_teacher"]
+    teacher_by_id = lookups["teacher_by_id"]
     assignment_by_id = lookups["assignment_by_id"]
     assignments_by_teacher = lookups["assignments_by_teacher"]
     requirement_by_id = lookups["requirement_by_id"]
@@ -319,10 +321,6 @@ def _compute_penalty_score(solver, schedule_vars, data, lookups, timeslots):
 
     # ---- teacher_preferences (full implementation) ----
     for teacher_id, assignment_ids in assignments_by_teacher.items():
-        prefs = preferences_by_teacher.get(teacher_id)
-        if prefs is None:
-            continue
-
         taught_timeslot_ids = []
         for a_id in assignment_ids:
             for ts in timeslots:
@@ -331,11 +329,17 @@ def _compute_penalty_score(solver, schedule_vars, data, lookups, timeslots):
 
         total_hours = len(taught_timeslot_ids)
 
-        # Hours range
-        if prefs["min_hours"] is not None and total_hours < prefs["min_hours"]:
-            total_penalty += (prefs["min_hours"] - total_hours) * OUTSIDE_HOURS_RANGE_PENALTY_PER_HOUR
-        if prefs["max_hours"] is not None and total_hours > prefs["max_hours"]:
-            total_penalty += (total_hours - prefs["max_hours"]) * OUTSIDE_HOURS_RANGE_PENALTY_PER_HOUR
+        # Hours range: workload band comes from the teacher record (admin-set).
+        trec = teacher_by_id.get(teacher_id) or {}
+        tmin, tmax = trec.get("min_hours"), trec.get("max_hours")
+        if tmin is not None and total_hours < tmin:
+            total_penalty += (tmin - total_hours) * OUTSIDE_HOURS_RANGE_PENALTY_PER_HOUR
+        if tmax is not None and total_hours > tmax:
+            total_penalty += (total_hours - tmax) * OUTSIDE_HOURS_RANGE_PENALTY_PER_HOUR
+
+        prefs = preferences_by_teacher.get(teacher_id)
+        if prefs is None:
+            continue
 
         # Collect (day, hour) pairs for this teacher
         teacher_day_hours = {}
