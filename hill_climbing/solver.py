@@ -129,6 +129,7 @@ def _build_lookup_maps(data: dict):
         "assignments_by_group": assignments_by_group,
         "constraint_by_teacher_timeslot": constraint_by_teacher_timeslot,
         "preferences_by_teacher": preferences_by_teacher,
+        "teacher_by_id": {t["id"]: t for t in data["teachers"]},
         "timeslot_by_id": timeslot_by_id,
         "subject_by_id": subject_by_id,
         "group_by_id": group_by_id,
@@ -351,18 +352,21 @@ def _score_schedule(schedule, data, lookups):
 
     # ---- Data-driven: teacher_preferences (full implementation) ----
     assignments_by_teacher = lookups["assignments_by_teacher"]
+    teacher_by_id = lookups["teacher_by_id"]
     for teacher_id, assignment_ids in assignments_by_teacher.items():
+        total_hours = sum(len(schedule[a_id]) for a_id in assignment_ids)
+
+        # Hours range: workload band from the teacher record (admin-set).
+        trec = teacher_by_id.get(teacher_id) or {}
+        tmin, tmax = trec.get("min_hours"), trec.get("max_hours")
+        if tmin is not None and total_hours < tmin:
+            total_penalty += (tmin - total_hours) * OUTSIDE_HOURS_RANGE_PENALTY_PER_HOUR
+        if tmax is not None and total_hours > tmax:
+            total_penalty += (total_hours - tmax) * OUTSIDE_HOURS_RANGE_PENALTY_PER_HOUR
+
         prefs = preferences_by_teacher.get(teacher_id)
         if prefs is None:
             continue
-
-        total_hours = sum(len(schedule[a_id]) for a_id in assignment_ids)
-
-        # Hours range
-        if prefs["min_hours"] is not None and total_hours < prefs["min_hours"]:
-            total_penalty += (prefs["min_hours"] - total_hours) * OUTSIDE_HOURS_RANGE_PENALTY_PER_HOUR
-        if prefs["max_hours"] is not None and total_hours > prefs["max_hours"]:
-            total_penalty += (total_hours - prefs["max_hours"]) * OUTSIDE_HOURS_RANGE_PENALTY_PER_HOUR
 
         # Collect (day, hour) pairs for this teacher
         teacher_day_hours = {}
