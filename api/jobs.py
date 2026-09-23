@@ -128,18 +128,16 @@ def _worker(job_id: str) -> None:
             )
 
 
-def start_generation_job():
+def _reserve_job_slot():
     """
-    Starts a generation run in a background thread.
-
-    Returns the new job_id, or None if a generation is ALREADY running
-    (the caller turns None into an HTTP 409).
+    Reap stale 'running' jobs, then atomically reserve a new job slot — unless a
+    generation (standard OR memetic) is genuinely running right now. A job still
+    marked 'running' past _MAX_JOB_SECONDS is a crashed thread; it's reaped so it
+    can't block generation forever. Returns a new job_id, or None if a fresh
+    generation is already in progress. Shared by BOTH start functions.
     """
     with _LOCK:
         now = _now()
-        # A job is "really" running only if it's marked running AND started
-        # recently. A stale running job (crashed thread that never updated its
-        # status) is ignored so generation can't be blocked permanently.
         really_running = any(
             j["status"] == "running"
             and (now - j["started_at"]).total_seconds() < _MAX_JOB_SECONDS
@@ -147,7 +145,6 @@ def start_generation_job():
         )
         if really_running:
             return None
-        # Mark any stale running jobs as failed, so they stop lingering.
         for j in _JOBS.values():
             if j["status"] == "running" and (now - j["started_at"]).total_seconds() >= _MAX_JOB_SECONDS:
                 j["status"] = "failed"
@@ -157,12 +154,21 @@ def start_generation_job():
         _JOBS[job_id] = {
             "job_id": job_id,
             "status": "running",
-            "started_at": _now(),
+            "started_at": now,
             "finished_at": None,
             "result": None,
             "error": None,
         }
+        return job_id
 
+def start_generation_job():
+    """
+    Starts a generation run in a background thread.
+    Returns the new job_id, or None if a generation is ALREADY running (409).
+    """
+    job_id = _reserve_job_slot()
+    if job_id is None:
+        return None
     thread = threading.Thread(target=_worker, args=(job_id,), daemon=True)
     thread.start()
     return job_id
