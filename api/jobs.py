@@ -282,25 +282,13 @@ def _memetic_worker(job_id: str) -> None:
 
 def start_memetic_job():
     """
-    Starts a memetic generation as a background job. Shares the _JOBS registry
-    and _LOCK with the standard pipeline, so the one-at-a-time rule covers BOTH:
-    if any generation (standard OR memetic) is running, this returns None and
-    the caller turns that into a 409.
+    Starts a memetic generation as a background job. The one-at-a-time rule (and
+    now the stale-job reaping) is shared with the standard pipeline via
+    _reserve_job_slot, so a crashed run can no longer block generation forever.
     """
-    with _LOCK:
-        already_running = any(j["status"] == "running" for j in _JOBS.values())
-        if already_running:
-            return None
-        job_id = uuid.uuid4().hex
-        _JOBS[job_id] = {
-            "job_id": job_id,
-            "status": "running",
-            "started_at": _now(),
-            "finished_at": None,
-            "result": None,
-            "error": None,
-        }
-
+    job_id = _reserve_job_slot()
+    if job_id is None:
+        return None
     thread = threading.Thread(target=_memetic_worker, args=(job_id,), daemon=True)
     thread.start()
     return job_id
