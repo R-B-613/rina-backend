@@ -59,9 +59,10 @@ PREFERENCE_WEIGHTS = {
 # range from teacher_preferences.
 OUTSIDE_HOURS_RANGE_PENALTY_PER_HOUR = 5
 
-# Penalty for scheduling more than 1 hour of the same subject on the same
-# day for the same student group (encourages distribution across the week).
-SUBJECT_DISTRIBUTION_PENALTY_PER_EXTRA_HOUR = 5
+# פיזור מקצועות אותו-יום מנוטרל במנוע כדי להתיישר עם scorer ההפרות (B),
+# שהמנהל כבר הסיר ממנו את הסעיף. הפיזור עדיין נשלט דרך "מקסימום ליום" בהגדרות מוסד.
+# (לשחזור מספרי הספר: החזר ל-5 + checkout לתגית research-v1.)
+SUBJECT_DISTRIBUTION_PENALTY_PER_EXTRA_HOUR = 0
 
 # ---------------------------------------------------------------------------
 # CSP solver settings
