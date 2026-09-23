@@ -203,8 +203,6 @@ def run_memetic_pipeline() -> dict:
         time_budget_seconds=MEMETIC_TIME_BUDGET_SECONDS,
     )
 
-    from min_conflicts_repair import repair_result
-    memetic_result = repair_result(memetic_result, data)
     comparison = save_and_select_best_result([memetic_result])
     
 
