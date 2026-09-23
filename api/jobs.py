@@ -44,6 +44,7 @@ from csp.solver import run_csp
 from hill_climbing.solver import run_hill_climbing
 from genetic.solver import run_genetic
 from genetic.solver import run_genetic_memetic
+from sa_repair import repair_with_simulated_annealing
 from hybrid_common import get_csp_seed, get_balanced_csp_seed
 
 
