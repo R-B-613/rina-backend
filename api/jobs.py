@@ -194,13 +194,36 @@ def run_memetic_pipeline() -> dict:
     data = fetch_all_data()
 
     seed, _csp_result = get_balanced_csp_seed(data, max_spread=3)
+    seed_kind = "balanced_csp"
     if seed is None:
         # Balanced CSP infeasible -> fall back to the plain CSP seed.
+        print("[pipeline] balanced CSP seed INFEASIBLE (max_spread=3) -> falling back to plain CSP", flush=True)
         seed, _csp_result = get_csp_seed(data)
+        seed_kind = "plain_csp"
+    print(f"[pipeline] memetic seed chosen = {seed_kind}", flush=True)
 
     memetic_result, perf = measure_performance(
         run_genetic_memetic, data, seed,
         time_budget_seconds=MEMETIC_TIME_BUDGET_SECONDS,
+    )
+
+    # DIAGNOSTIC: seed + memetic on BOTH scorers.
+    #   A = _score_schedule (what memetic/repair optimize; includes subject-distribution)
+    #   B = violations scorer (what the UI panel shows; subject-distribution removed)
+    from scoring_violations import score_genetic_schedule_with_violations
+    from genetic.solver import _build_lookup_maps
+    from min_conflicts_repair import _entries_to_schedule_map
+    _lk = _build_lookup_maps(data)
+    _mem_map = _entries_to_schedule_map(memetic_result["schedule_entries"], data)
+    _memB, _memvios = score_genetic_schedule_with_violations(_mem_map, data, _lk)
+    _hard = sum(1 for v in _memvios if v.get("severity") == "hard")
+    _soft = sum(1 for v in _memvios if v.get("severity") == "soft")
+    print(
+        f"[pipeline] seed={seed_kind} "
+        f"seed_score(A)={memetic_result.get('seed_score')} "
+        f"memetic(A)={memetic_result.get('score')} "
+        f"memetic(B/violations)={_memB:.1f} [hard={_hard} soft={_soft}] before-repair",
+        flush=True,
     )
 
     from min_conflicts_repair import repair_result
