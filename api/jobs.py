@@ -204,7 +204,9 @@ def run_memetic_pipeline() -> dict:
         time_budget_seconds=MEMETIC_TIME_BUDGET_SECONDS,
     )
 
+    memetic_result = repair_with_simulated_annealing(data, memetic_result)
     comparison = save_and_select_best_result([memetic_result])
+    
 
     return {
         "comparison": comparison,
