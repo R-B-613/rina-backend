@@ -70,9 +70,6 @@ def verify_seed_matches_csp(data):
     """
     SELF-TEST for step 1. Confirms the reconstructed seed_map scores IDENTICALLY
     to CSP's own reported violations - i.e. the conversion is faithful.
-
-    Prints a clear PASS/FAIL. Run this before building anything on top of the
-    conversion, so we know the seed we hand to HC/GA really is CSP's schedule.
     """
     seed_map, csp_result = get_csp_seed(data)
     if seed_map is None:
@@ -84,18 +81,6 @@ def verify_seed_matches_csp(data):
     seed_total, seed_violations = score_genetic_schedule_with_violations(
         seed_map, data, lookups
     )
-
-def get_balanced_csp_seed(data, max_spread=3):
-    """
-    Like get_csp_seed, but runs the BALANCE-CONSTRAINED CSP (no class has more
-    than `max_spread` day-spread). Returns (seed_schedule_map, csp_result), or
-    (None, csp_result) if the balanced CSP is infeasible.
-    """
-    csp_result = run_csp_balanced(data, max_spread=max_spread)
-    if csp_result.get("score") is None or not csp_result.get("schedule_entries"):
-        return None, csp_result
-    seed_map = csp_entries_to_schedule_map(csp_result["schedule_entries"], data)
-    return seed_map, csp_result
 
     # Compare against CSP's own violations count (same scorer, so should match).
     csp_violations = csp_result.get("violations") or []
@@ -119,6 +104,19 @@ def get_balanced_csp_seed(data, max_spread=3):
           if ok else "FAIL - seed does NOT match CSP; do not proceed.")
     print("=" * 56)
     return ok
+
+
+def get_balanced_csp_seed(data, max_spread=3):
+    """
+    Like get_csp_seed, but runs the BALANCE-CONSTRAINED CSP (no class has more
+    than `max_spread` day-spread). Returns (seed_schedule_map, csp_result), or
+    (None, csp_result) if the balanced CSP is infeasible.
+    """
+    csp_result = run_csp_balanced(data, max_spread=max_spread)
+    if csp_result.get("score") is None or not csp_result.get("schedule_entries"):
+        return None, csp_result
+    seed_map = csp_entries_to_schedule_map(csp_result["schedule_entries"], data)
+    return seed_map, csp_result
 
 
 if __name__ == "__main__":
