@@ -226,6 +226,17 @@ def run_memetic_pipeline() -> dict:
         flush=True,
     )
 
+        # DIAGNOSTIC: decompose the SEED on the violations scorer.
+    from collections import Counter
+    from scoring_violations import score_genetic_schedule_with_violations
+    from genetic.solver import _build_lookup_maps
+    _lk0 = _build_lookup_maps(data)
+    _seedB, _seedvios = score_genetic_schedule_with_violations(seed, data, _lk0)
+    _sh = sum(1 for v in _seedvios if v.get("severity") == "hard")
+    _ss = sum(1 for v in _seedvios if v.get("severity") == "soft")
+    _hardtypes = Counter(v["type"] for v in _seedvios if v.get("severity") == "hard")
+    print(f"[seed-diag] seed B={_seedB:.1f} hard={_sh} soft={_ss} hardtypes={dict(_hardtypes)}", flush=True)
+
     from min_conflicts_repair import repair_result
     memetic_result = repair_result(memetic_result, data)
     comparison = save_and_select_best_result([memetic_result])
