@@ -618,6 +618,7 @@ def run_csp_balanced(data: dict, max_spread: int = 3) -> dict:
 
     _add_structural_hard_constraints(model, schedule_vars, data, lookups, timeslots)
     _add_student_contiguity_constraints(model, schedule_vars, data, lookups, timeslots)
+    _add_admin_structure_constraints(model, schedule_vars, data, lookups, timeslots)
     _add_balance_hard_constraint(model, schedule_vars, data, lookups, timeslots, max_spread)
 
     solver = cp_model.CpSolver()
