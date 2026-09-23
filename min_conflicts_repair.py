@@ -18,11 +18,20 @@ good but may carry a few residual violations.
 2. Repeatedly locate the lessons that SIT IN a HARD conflict (teacher/group
    double-booking, a lesson on a non-active day or past the grade's end, room
    over-capacity) — the "culprit" lessons, read straight off the schedule.
-3. For each culprit, try to relocate ONLY that one lesson to a LEGAL free slot
-   (active day, within the grade's ceiling, no teacher/group clash). Keep the
-   first move that LOWERS the unified score (first-improvement). Because the
-   accept test uses the same total scorer as everything else, a move can never
-   worsen any objective — hard or soft.
+3. For each culprit, try two moves, keeping the FIRST that LOWERS the unified
+   score (first-improvement):
+     (a) PRIMARY — swap the culprit's slot with another lesson of the SAME
+         class. This leaves that class's set of occupied slots identical (no new
+         gap / late start / imbalance); it only exchanges which subject sits in
+         each of the two slots — enough to clear a teacher/room clash. In a
+         packed timetable there are almost no empty slots, so a swap is what
+         actually fixes most conflicts.
+     (b) FALLBACK — relocate the lesson to a genuinely free legal slot. Needed
+         when a swap can't help: a CLASS double-booked in one slot (one lesson
+         must leave to a slot the class doesn't yet occupy), or a lesson stuck
+         past the grade's ceiling with a free earlier slot to escape to.
+   Because the accept test uses the same total scorer as everything else, no
+   move — swap or relocation — can ever worsen any objective, hard or soft.
 4. When no targeted hard move improves anymore, run a short bounded local-search
    polish (reusing the GA's own _local_search) to trim residual SOFT violations
    without ever raising the score.
@@ -229,6 +238,27 @@ def _legal_targets(a_id, idx, schedule, lookups, active_days, ceiling):
     return targets
 
 
+def _class_swap_partners(a_id, idx, schedule, lookups, sync_ids):
+    """
+    Yield (other_assignment_id, other_slot_index) for every OTHER lesson of the
+    SAME class as (a_id, idx). Swapping two lessons of one class leaves that
+    class's occupied-slot set unchanged — it only exchanges which subject sits
+    in each of the two slots — so it can relieve a teacher/room clash without
+    ever creating a student gap, late start or imbalance. Sync-block lessons are
+    skipped (moving one alone would break alignment).
+    """
+    assignment_by_id = lookups["assignment_by_id"]
+    requirement_by_id = lookups["requirement_by_id"]
+    assignments_by_group = lookups["assignments_by_group"]
+
+    gid = requirement_by_id[assignment_by_id[a_id]["cur_requirement_id"]]["student_group_id"]
+    for a2 in assignments_by_group[gid]:
+        if a2 == a_id or a2 in sync_ids:
+            continue
+        for idx2 in range(len(schedule[a2])):
+            yield a2, idx2
+
+
 # ---------------------------------------------------------------------------
 # Core repair
 # ---------------------------------------------------------------------------
@@ -270,14 +300,38 @@ def repair_schedule(schedule, data, lookups=None,
             if time.perf_counter() >= deadline:
                 break
 
-            for t in _legal_targets(a_id, idx, best, lookups, active_days, ceiling):
+            moved = False
+
+            # (a) PRIMARY: swap with another lesson of the SAME class. Keeps the
+            # class's occupied slots identical — no new gap / late start /
+            # imbalance — and just reshuffles which subject sits when. This is
+            # what clears most clashes in a packed timetable.
+            for a2, idx2 in _class_swap_partners(a_id, idx, best, lookups, sync_ids):
                 candidate = {aid: list(slots) for aid, slots in best.items()}
-                candidate[a_id][idx] = t
+                candidate[a_id][idx], candidate[a2][idx2] = (
+                    candidate[a2][idx2], candidate[a_id][idx]
+                )
                 sc = _score_schedule(candidate, data, lookups)
                 if sc < best_score:            # first-improvement
                     best, best_score = candidate, sc
-                    improved_any = True
+                    moved = True
                     break
+
+            # (b) FALLBACK: relocate to a free legal slot. Handles what a swap
+            # can't — a CLASS double-booked in one slot, or escaping a slot past
+            # the grade's ceiling / on an inactive day.
+            if not moved:
+                for t in _legal_targets(a_id, idx, best, lookups, active_days, ceiling):
+                    candidate = {aid: list(slots) for aid, slots in best.items()}
+                    candidate[a_id][idx] = t
+                    sc = _score_schedule(candidate, data, lookups)
+                    if sc < best_score:
+                        best, best_score = candidate, sc
+                        moved = True
+                        break
+
+            if moved:
+                improved_any = True
 
         if not improved_any:
             break
