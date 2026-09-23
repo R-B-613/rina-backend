@@ -350,23 +350,43 @@ def repair_result(result, data,
                   time_budget_seconds=REPAIR_TIME_BUDGET_SECONDS,
                   verbose=True):
     """
-    Pipeline entry point. Takes the MEMETIC result dict, repairs its schedule,
-    and returns a result dict of the SAME shape (algorithm still
-    "GENETIC_MEMETIC"), carrying only the post-repair score/entries/violations.
+    Pipeline entry point. Takes the MEMETIC result dict and returns EITHER a
+    strictly-improved result of the same shape, OR the ORIGINAL memetic result
+    untouched. It can never return something worse — two guards below make
+    "made it worse" mathematically impossible.
 
-    Logs the before/after score to the server log; the UI sees only "after".
+    Logs before/after to the server log; the UI sees only the final score.
     """
     entries = result.get("schedule_entries") or []
-    if not entries:
+    reported = result.get("score")
+    if not entries or reported is None:
         return result  # nothing to repair (e.g. NO_DATA) — pass through untouched
 
     lookups = _build_lookup_maps(data)
     schedule_map = _entries_to_schedule_map(entries, data)
-
     score_before = _score_schedule(schedule_map, data, lookups)
+
+    # GUARD 1 — faithfulness. The repair accepts moves by _score_schedule, which
+    # is the SAME scorer that produced the memetic's saved/shown number. If the
+    # schedule rebuilt from entries doesn't reproduce that number, the accept
+    # test would be judging a different quantity than the UI shows — so refuse
+    # to touch it and keep the memetic exactly as-is.
+    if abs(score_before - reported) > 0.5:
+        if verbose:
+            print(f"[repair] SKIP: rebuilt {score_before:.1f} != memetic {reported:.1f}; keeping memetic")
+        return result
+
     repaired_map, score_after = repair_schedule(
         schedule_map, data, lookups, time_budget_seconds=time_budget_seconds
     )
+
+    # GUARD 2 — strict-improvement safety net. Replace the memetic ONLY if the
+    # repaired schedule scores strictly LOWER on the exact same scorer. On a tie
+    # or (impossible-by-construction) regression, return the memetic untouched.
+    if score_after >= score_before:
+        if verbose:
+            print(f"[repair] no gain (before={score_before:.1f} after={score_after:.1f}); keeping memetic")
+        return result
 
     timeslot_ids = [ts["id"] for ts in data["timeslots"]]
     schedule_entries = _assign_rooms(repaired_map, data, timeslot_ids)
@@ -375,12 +395,13 @@ def repair_result(result, data,
     )
 
     if verbose:
-        hard_after = sum(1 for v in violations if v.get("severity") == "hard")
-        soft_after = sum(1 for v in violations if v.get("severity") == "soft")
+        _bt, before_vios = score_genetic_schedule_with_violations(schedule_map, data, lookups)
+        hb = sum(1 for v in before_vios if v.get("severity") == "hard")
+        ha = sum(1 for v in violations if v.get("severity") == "hard")
+        sa = sum(1 for v in violations if v.get("severity") == "soft")
         print(
-            f"[repair] score before={score_before:.1f}  after={score_after:.1f}  "
-            f"(improved {score_before - score_after:.1f}; "
-            f"hard={hard_after}, soft={soft_after} remaining)"
+            f"[repair] improved {score_before:.1f} -> {score_after:.1f} "
+            f"(-{score_before - score_after:.1f}); hard {hb}->{ha}, soft now {sa}"
         )
 
     out = dict(result)
