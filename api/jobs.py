@@ -44,7 +44,6 @@ from csp.solver import run_csp
 from hill_climbing.solver import run_hill_climbing
 from genetic.solver import run_genetic
 from genetic.solver import run_genetic_memetic
-from sa_repair import repair_with_simulated_annealing
 from hybrid_common import get_csp_seed, get_balanced_csp_seed
 
 
@@ -204,7 +203,6 @@ def run_memetic_pipeline() -> dict:
         time_budget_seconds=MEMETIC_TIME_BUDGET_SECONDS,
     )
 
-    memetic_result = repair_with_simulated_annealing(data, memetic_result)
     comparison = save_and_select_best_result([memetic_result])
     
 
