@@ -106,7 +106,7 @@ def verify_seed_matches_csp(data):
     return ok
 
 
-def get_balanced_csp_seed(data, max_spread=3):
+def get_balanced_csp_seed(data, max_spread=2):
     """
     Like get_csp_seed, but runs the BALANCE-CONSTRAINED CSP (no class has more
     than `max_spread` day-spread). Returns (seed_schedule_map, csp_result), or
