@@ -190,24 +190,15 @@ def get_job(job_id: str):
 # ---------------------------------------------------------------------------
 
 MEMETIC_TIME_BUDGET_SECONDS = 120.0
-MEMETIC_ATTEMPTS = 2  # best-of-N: run the memetic N times, keep the best.
-                      # Raise to 3 ONLY if you also raise _MAX_JOB_SECONDS to ~600.
 
 
 def run_memetic_pipeline() -> dict:
     """
-    Builds ONE feasible CSP seed, runs the memetic GA from it MEMETIC_ATTEMPTS
-    times (best-of-N) with a different RNG state each time, keeps the
-    lowest-scoring run, repairs it, and saves it as the current schedule.
-
-    Best-of-N is worth it because the memetic is variance-dominated: repeated
-    runs from the same seed land in different local optima, so keeping the best
-    lowers BOTH the score and the run-to-run variance. The seed is a
-    deterministic CSP, so it's computed once and shared by every attempt.
+    CSP seed (balanced; plain CSP as fallback) -> memetic GA (GA + embedded
+    hill-climbing on every child). Saves the memetic result as the current schedule.
     """
     data = fetch_all_data()
 
-    # ---- Seed once (deterministic); shared by all attempts. ----
     seed, _csp_result = get_balanced_csp_seed(data, max_spread=3)
     seed_kind = "balanced_csp"
     if seed is None:
@@ -216,45 +207,26 @@ def run_memetic_pipeline() -> dict:
         seed_kind = "plain_csp"
     print(f"[pipeline] memetic seed chosen = {seed_kind}", flush=True)
 
-    # ---- best-of-N: keep the lowest-scoring memetic run. ----
-    # The memetic uses Python's global `random` (never re-seeded internally), so
-    # seeding a distinct value per attempt makes each run different AND makes the
-    # whole button reproducible across generations.
-    best_result, best_perf = None, None
-    for attempt in range(MEMETIC_ATTEMPTS):
-        random.seed(attempt)
-        result, perf = measure_performance(
-            run_genetic_memetic, data, seed,
-            time_budget_seconds=MEMETIC_TIME_BUDGET_SECONDS,
-        )
-        print(f"[pipeline] memetic attempt {attempt + 1}/{MEMETIC_ATTEMPTS} score={result.get('score')}", flush=True)
-        if best_result is None:
-            best_result, best_perf = result, perf
-        elif result.get("score") is not None and (
-            best_result.get("score") is None or result["score"] < best_result["score"]
-        ):
-            best_result, best_perf = result, perf
-    print(f"[pipeline] best-of-{MEMETIC_ATTEMPTS} chosen score={best_result.get('score')}", flush=True)
+    result, perf = measure_performance(
+        run_genetic_memetic, data, seed,
+        time_budget_seconds=MEMETIC_TIME_BUDGET_SECONDS,
+    )
+    print(f"[pipeline] memetic score={result.get('score')}", flush=True)
 
-    # ---- Targeted violation repair on the winner (only strict improvements). ----
-    from min_conflicts_repair import repair_result
-    best_result = repair_result(best_result, data)
-
-    comparison = save_and_select_best_result([best_result])
+    comparison = save_and_select_best_result([result])
 
     return {
         "comparison": comparison,
         "metrics": {
             "GENETIC_MEMETIC": {
-                "status": best_result["status"],
-                "score": best_result["score"],
-                "seed_score": best_result.get("seed_score"),
-                "runtime_seconds": best_perf["runtime_seconds"],
-                "peak_memory_mb": best_perf["peak_memory_mb"],
+                "status": result["status"],
+                "score": result["score"],
+                "seed_score": result.get("seed_score"),
+                "runtime_seconds": perf["runtime_seconds"],
+                "peak_memory_mb": perf["peak_memory_mb"],
             }
         },
     }
-
 
 def _memetic_worker(job_id: str) -> None:
     try:
