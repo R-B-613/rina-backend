@@ -211,7 +211,7 @@ def run_memetic_pipeline() -> dict:
         run_genetic_memetic, data, seed,
         time_budget_seconds=MEMETIC_TIME_BUDGET_SECONDS,
     )
-    print(f"[pipeline] memetic score={result.get('score')}", flush=True)
+    print(f"[pipeline] seed_score={result.get('seed_score')} -> final={result.get('score')}", flush=True)
 
     comparison = save_and_select_best_result([result])
 
