@@ -602,6 +602,111 @@ def _mutate_targeted(schedule, timeslot_ids, lookups, data, sync_groups=None):
     # If we couldn't find a good targeted move, fall back to random.
     _mutate(schedule, timeslot_ids, sync_groups=sync_groups)
 
+def _mutate_priority(schedule, timeslot_ids, lookups, data, sync_groups=None):
+    """
+    Conflict-directed move, biased toward the admin pedagogical constraints that
+    carry the most penalty. With prob TARGETED_MUTATION_FRACTION it picks a
+    lesson that CURRENTLY violates a pedagogical rule (weighted by that rule's
+    penalty, so PE/high-cost rules are chosen first) and proposes a corrective
+    slot. Otherwise it falls back to a plain random move (exploration).
+
+    ADDITIVE + SAFE: it only proposes a move. The caller (_local_search) keeps it
+    ONLY if _score_schedule strictly improves, so this can never worsen the total.
+    """
+    # Exploration fallback — same fraction the targeted mutation already uses.
+    if random.random() > TARGETED_MUTATION_FRACTION:
+        _mutate(schedule, timeslot_ids, sync_groups=sync_groups)
+        return
+
+    constraints = data.get("pedagogical_constraints", [])
+    if not constraints:
+        _mutate(schedule, timeslot_ids, sync_groups=sync_groups)
+        return
+
+    from scoring_config import (
+        PED_MAX_PER_DAY_PENALTY, PED_NOT_LAST_PENALTY,
+        PED_MORNING_ONLY_PENALTY, PED_MORNING_ONLY_THRESHOLD,
+        PED_NOT_CONSECUTIVE_PENALTY, PED_MIN_GAP_PENALTY,
+    )
+
+    requirement_by_id = lookups["requirement_by_id"]
+    timeslot_by_id = lookups["timeslot_by_id"]
+
+    # (gid, day) -> list of (sid, hour, assignment_id, hour_index)
+    gd = {}
+    for ta in data["teacher_assignments"]:
+        req = requirement_by_id[ta["cur_requirement_id"]]
+        gid, sid = req["student_group_id"], req["subject_id"]
+        for h_idx, t in enumerate(schedule[ta["id"]]):
+            ts = timeslot_by_id[t]
+            gd.setdefault((gid, ts["day_of_week"]), []).append(
+                (sid, ts["hour_of_day"], ta["id"], h_idx))
+
+    morning_slots = [t for t, ts in timeslot_by_id.items()
+                     if ts["hour_of_day"] <= PED_MORNING_ONLY_THRESHOLD]
+
+    # Collect offending lessons as (weight, a_id, h_idx, ctype, day).
+    offenders = []
+    for c in constraints:
+        ctype = c["constraint_type"]
+        a, b = c.get("subject_a_id"), c.get("subject_b_id")
+        n = c.get("numeric_value")
+        w = c.get("weight") or 1
+        for (gid, day), items in gd.items():
+            if ctype == "morning_only" and a is not None:
+                for sid, h, aid, hi in items:
+                    if sid == a and h > PED_MORNING_ONLY_THRESHOLD:
+                        offenders.append((PED_MORNING_ONLY_PENALTY * w, aid, hi, ctype, day))
+            elif ctype == "max_per_day" and a is not None and n is not None:
+                same = [(aid, hi) for sid, h, aid, hi in items if sid == a]
+                if len(same) > n:
+                    for aid, hi in same:
+                        offenders.append((PED_MAX_PER_DAY_PENALTY * w, aid, hi, ctype, day))
+            elif ctype == "not_last" and a is not None and items:
+                last = max(h for _, h, _, _ in items)
+                for sid, h, aid, hi in items:
+                    if sid == a and h == last:
+                        offenders.append((PED_NOT_LAST_PENALTY * w, aid, hi, ctype, day))
+            elif ctype == "not_consecutive" and a is not None and b is not None:
+                b_h = set(h for sid, h, _, _ in items if sid == b)
+                for sid, h, aid, hi in items:
+                    if sid == a and ((h - 1) in b_h or (h + 1) in b_h):
+                        offenders.append((PED_NOT_CONSECUTIVE_PENALTY * w, aid, hi, ctype, day))
+            elif ctype == "min_gap" and a is not None:
+                b_eff = b if b is not None else a
+                req_gap = n if n is not None else 0
+                a_l = [(h, aid, hi) for sid, h, aid, hi in items if sid == a]
+                b_h = [h for sid, h, _, _ in items if sid == b_eff]
+                for h, aid, hi in a_l:
+                    others = [hb for hb in b_h if not (b_eff == a and hb == h)]
+                    for hb in others:
+                        sep = abs(h - hb) - 1
+                        if (req_gap == 0 and sep != 0) or (req_gap > 0 and sep < req_gap):
+                            offenders.append((PED_MIN_GAP_PENALTY * w, aid, hi, ctype, day))
+                            break
+
+    if not offenders:
+        _mutate(schedule, timeslot_ids, sync_groups=sync_groups)
+        return
+
+    weight, a_id, h_idx, ctype, day = random.choices(
+        offenders, weights=[o[0] for o in offenders], k=1)[0]
+
+    # Sync blocks: keep it simple and correct — fall back to a plain random move.
+    if sync_groups and any(a_id in ids for ids in sync_groups.values()):
+        _mutate(schedule, timeslot_ids, sync_groups=sync_groups)
+        return
+
+    # Type-aware corrective slot; the strict-improvement gate validates it.
+    if ctype == "morning_only" and morning_slots:
+        new_slot = random.choice(morning_slots)
+    elif ctype == "max_per_day":
+        other_days = [t for t in timeslot_ids if timeslot_by_id[t]["day_of_week"] != day]
+        new_slot = random.choice(other_days) if other_days else random.choice(timeslot_ids)
+    else:  # not_last / not_consecutive / min_gap — jiggle, let the gate decide
+        new_slot = random.choice(timeslot_ids)
+
+    schedule[a_id][h_idx] = new_slot
 
 
 # ---------------------------------------------------------------------------
@@ -970,7 +1075,7 @@ def _local_search(schedule, data, lookups, timeslot_ids, sync_groups,
             break
         # Propose one random single-slot move on a fresh copy.
         candidate = {a_id: list(slots) for a_id, slots in best.items()}
-        _mutate(candidate, timeslot_ids, sync_groups=sync_groups)
+        _mutate_priority(candidate, timeslot_ids, lookups, data, sync_groups=sync_groups)
         cand_score = _score_schedule(candidate, data, lookups)
         if cand_score < best_score:
             best = candidate
@@ -981,8 +1086,8 @@ def _local_search(schedule, data, lookups, timeslot_ids, sync_groups,
  
 def run_genetic_memetic(data: dict, seed_schedule: dict,
                         time_budget_seconds: float = None,
-                        seed_fraction: float = 0.5,
-                        seed_mutations: int = 15,
+                        seed_fraction: float = 0.6,
+                        seed_mutations: int = 12,
                         local_search_steps: int = None) -> dict:
     """
     MEMETIC hybrid: identical to run_genetic_from_seed (CSP-seeded GA), but each
