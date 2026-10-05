@@ -290,6 +290,21 @@ def _add_admin_structure_constraints(model, schedule_vars, data, lookups, timesl
             if not allowed:
                 model.Add(schedule_vars[(ta["id"], ts["id"])] == 0)
 
+def _add_teacher_availability_constraints(model, schedule_vars, data, lookups, timeslots):
+    """
+    HARD: a teacher may not be assigned to a timeslot they marked 'cannot teach'
+    (teacher_constraints, constraint_type == 'hard'). Forces the matching
+    decision variables to 0 — structurally impossible, exactly like the admin
+    day-structure. Soft ('prefers not') rows are left to the scorer, not forced.
+    """
+    constraint_by_teacher_timeslot = lookups["constraint_by_teacher_timeslot"]
+    for ta in data["teacher_assignments"]:
+        tid = ta["teacher_id"]
+        for ts in timeslots:
+            c = constraint_by_teacher_timeslot.get((tid, ts["id"]))
+            if c is not None and c["constraint_type"] == "hard":
+                model.Add(schedule_vars[(ta["id"], ts["id"])] == 0)
+
 def _compute_penalty_score(solver, schedule_vars, data, lookups, timeslots):
     """
     Computes the unified penalty score based on the solved CP-SAT model.
@@ -524,6 +539,7 @@ def run_csp(data: dict) -> dict:
     _add_structural_hard_constraints(model, schedule_vars, data, lookups, timeslots)
     _add_student_contiguity_constraints(model, schedule_vars, data, lookups, timeslots)
     _add_admin_structure_constraints(model, schedule_vars, data, lookups, timeslots)
+    _add_teacher_availability_constraints(model, schedule_vars, data, lookups, timeslots)
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = CSP_MAX_SOLVE_SECONDS
@@ -619,6 +635,7 @@ def run_csp_balanced(data: dict, max_spread: int = 3) -> dict:
     _add_structural_hard_constraints(model, schedule_vars, data, lookups, timeslots)
     _add_student_contiguity_constraints(model, schedule_vars, data, lookups, timeslots)
     _add_admin_structure_constraints(model, schedule_vars, data, lookups, timeslots)
+    _add_teacher_availability_constraints(model, schedule_vars, data, lookups, timeslots)
     _add_balance_hard_constraint(model, schedule_vars, data, lookups, timeslots, max_spread)
 
     solver = cp_model.CpSolver()
