@@ -206,6 +206,7 @@ def run_memetic_pipeline() -> dict:
         seed, _csp_result = get_csp_seed(data)
         seed_kind = "plain_csp"
     print(f"[pipeline] memetic seed chosen = {seed_kind}", flush=True)
+    print(f"[pipeline] memetic defaults = {run_genetic_memetic.__defaults__}", flush=True)
 
     result, perf = measure_performance(
         run_genetic_memetic, data, seed,
