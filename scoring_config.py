@@ -51,7 +51,7 @@ SOFT_CONSTRAINT_WEIGHT_MULTIPLIER = 1
 PREFERENCE_WEIGHTS = {
     "early_finish": 2,      # priority_early_finish
     "no_gaps": 2,            # priority_no_gaps
-    "free_day": 3,            # priority_free_day
+    "free_day": 70,            # priority_free_day
     "consecutive": 2,        # priority_consecutive / preferred_consecutive
 }
 
