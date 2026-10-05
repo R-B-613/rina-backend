@@ -259,6 +259,8 @@ def student_structure_penalties(schedule, data, lookups, collect=False):
     # Balanced daily load: penalise big day-to-day swings in a class's lesson count (soft)
     group_daily_counts = {}
     for (gid, day), hours in group_day_hours.items():
+        if day == 6:        # Friday is always short — exclude from balance
+            continue
         group_daily_counts.setdefault(gid, []).append(len(set(hours)))
     for gid, counts in group_daily_counts.items():
         # only compare across the days the class actually has lessons
