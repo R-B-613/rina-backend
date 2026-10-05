@@ -579,10 +579,10 @@ def run_csp(data: dict) -> dict:
 def _add_balance_hard_constraint(model, schedule_vars, data, lookups, timeslots, max_spread):
     """
     HARD balance constraint: for each class, (busiest day - lightest day) in
-    lesson count must be <= max_spread. Reuses the same per-(day,hour) BoolVar
-    sums as the other constraints. This is the ONLY structural difference from
-    the standard CSP.
+    lesson count must be <= max_spread, measured over SUNDAY–THURSDAY only.
+    Friday (day 6) is always a short day and is excluded from the window.
     """
+    FRIDAY = 6
     assignments_by_group = lookups["assignments_by_group"]
     hours_by_day = {}
     ts_by_day_hour = {}
@@ -593,12 +593,16 @@ def _add_balance_hard_constraint(model, schedule_vars, data, lookups, timeslots,
     for group_id, assignment_ids in assignments_by_group.items():
         day_counts = []
         for day, hours in hours_by_day.items():
+            if day == FRIDAY:
+                continue
             cnt = model.NewIntVar(0, len(hours), f"bal_cnt_g{group_id}_d{day}")
             model.Add(cnt == sum(
                 schedule_vars[(a_id, ts_by_day_hour[(day, h)])]
                 for a_id in assignment_ids for h in hours
             ))
             day_counts.append(cnt)
+        if len(day_counts) < 2:
+            continue
         max_day = model.NewIntVar(0, 40, f"bal_max_g{group_id}")
         min_day = model.NewIntVar(0, 40, f"bal_min_g{group_id}")
         model.AddMaxEquality(max_day, day_counts)
