@@ -981,8 +981,8 @@ def _local_search(schedule, data, lookups, timeslot_ids, sync_groups,
  
 def run_genetic_memetic(data: dict, seed_schedule: dict,
                         time_budget_seconds: float = None,
-                        seed_fraction: float = 0.6,
-                        seed_mutations: int = 30,
+                        seed_fraction: float = 0.5,
+                        seed_mutations: int = 15,
                         local_search_steps: int = None) -> dict:
     """
     MEMETIC hybrid: identical to run_genetic_from_seed (CSP-seeded GA), but each
