@@ -128,7 +128,7 @@ HOLY_MORNING_THRESHOLD = 4  # holy lessons after period 4 are penalised
 
 # SOFT: day-to-day imbalance in a class's daily lesson count. Per hour of spread
 # (longest day minus shortest day, beyond a tolerance). 
-BALANCE_PENALTY_PER_HOUR = 200
+BALANCE_PENALTY_PER_HOUR = 5000
 BALANCE_TOLERANCE = 2  # a spread of up to 2 hours between days is free
 
 # STRONG-SOFT: a grade exceeding its admin-defined max lessons per day.
