@@ -602,13 +602,34 @@ def _mutate_targeted(schedule, timeslot_ids, lookups, data, sync_groups=None):
     # If we couldn't find a good targeted move, fall back to random.
     _mutate(schedule, timeslot_ids, sync_groups=sync_groups)
 
+def _free_teacher_slot(schedule, data, timeslot_by_id, a_id, tid,
+                       candidate_slots, class_occupied):
+    """Pick a target slot from candidate_slots where teacher `tid` is free
+    (not already teaching then) and not hard-blocked, and the class isn't
+    already using it. Returns a timeslot_id or None."""
+    blocked = {(c["teacher_id"], c["timeslot_id"])
+               for c in data.get("teacher_constraints", [])
+               if c.get("constraint_type") == "hard"}
+    teacher_busy = set()
+    for ta in data["teacher_assignments"]:
+        if ta["teacher_id"] != tid:
+            continue
+        for t in schedule[ta["id"]]:
+            teacher_busy.add(t)
+    cands = [t for t in candidate_slots
+             if t not in class_occupied
+             and t not in teacher_busy
+             and (tid, t) not in blocked]
+    return random.choice(cands) if cands else None
+
+
 def _mutate_priority(schedule, timeslot_ids, lookups, data, sync_groups=None):
     """Conflict-directed move, biased by penalty size, toward admin pedagogical
-    constraints AND day-to-day imbalance (Sun–Thu, Friday excluded). The balance
-    move prefers a lesson whose TEACHER is free on the class's light day, so it
-    picks a specialist/free teacher (art, the class's own teacher) rather than a
-    busy one. ADDITIVE + SAFE: _local_search keeps a move only if the total
-    score strictly improves."""
+    constraints, day-to-day imbalance (Sun–Thu), AND teacher-availability
+    ('cannot teach') violations. Balance, max_per_day and availability moves are
+    TEACHER-AWARE: they only move a lesson to a slot where its teacher is free
+    and not hard-blocked. ADDITIVE + SAFE: _local_search keeps a move only if the
+    total score strictly improves."""
     if random.random() > TARGETED_MUTATION_FRACTION:
         _mutate(schedule, timeslot_ids, sync_groups=sync_groups)
         return
@@ -618,11 +639,13 @@ def _mutate_priority(schedule, timeslot_ids, lookups, data, sync_groups=None):
         PED_MORNING_ONLY_PENALTY, PED_MORNING_ONLY_THRESHOLD,
         PED_NOT_CONSECUTIVE_PENALTY, PED_MIN_GAP_PENALTY,
         BALANCE_PENALTY_PER_HOUR, BALANCE_TOLERANCE,
+        TEACHER_HARD_CONSTRAINT_PENALTY,
     )
 
     FRIDAY = 6
     requirement_by_id = lookups["requirement_by_id"]
     timeslot_by_id = lookups["timeslot_by_id"]
+    constraint_by_teacher_timeslot = lookups["constraint_by_teacher_timeslot"]
 
     # (gid, day) -> list of (sid, hour, a_id, h_idx, teacher_id, t)
     gd = {}
@@ -643,7 +666,7 @@ def _mutate_priority(schedule, timeslot_ids, lookups, data, sync_groups=None):
     # offenders: (weight, kind, payload)
     offenders = []
 
-    # ---- pedagogical offenders (unchanged behaviour) ----
+    # ---- pedagogical offenders (unchanged, but carry teacher_id for max_per_day) ----
     for c in data.get("pedagogical_constraints", []):
         ctype = c["constraint_type"]
         a, b = c.get("subject_a_id"), c.get("subject_b_id")
@@ -653,39 +676,39 @@ def _mutate_priority(schedule, timeslot_ids, lookups, data, sync_groups=None):
             if ctype == "morning_only" and a is not None:
                 for sid, h, aid, hi, tid, t in items:
                     if sid == a and h > PED_MORNING_ONLY_THRESHOLD:
-                        offenders.append((PED_MORNING_ONLY_PENALTY * w, "ped",
-                                          (aid, hi, ctype, day)))
+                        offenders.append((PED_MORNING_ONLY_PENALTY * w, "ped_morning",
+                                          (aid, hi, day, tid)))
             elif ctype == "max_per_day" and a is not None and n is not None:
-                same = [(aid, hi) for sid, h, aid, hi, tid, t in items if sid == a]
+                same = [(aid, hi, tid) for sid, h, aid, hi, tid, t in items if sid == a]
                 if len(same) > n:
-                    for aid, hi in same:
-                        offenders.append((PED_MAX_PER_DAY_PENALTY * w, "ped",
-                                          (aid, hi, ctype, day)))
+                    for aid, hi, tid in same:
+                        offenders.append((PED_MAX_PER_DAY_PENALTY * w, "ped_maxday",
+                                          (aid, hi, day, tid)))
             elif ctype == "not_last" and a is not None and items:
                 last = max(h for _, h, _, _, _, _ in items)
                 for sid, h, aid, hi, tid, t in items:
                     if sid == a and h == last:
-                        offenders.append((PED_NOT_LAST_PENALTY * w, "ped",
-                                          (aid, hi, ctype, day)))
+                        offenders.append((PED_NOT_LAST_PENALTY * w, "ped_other",
+                                          (aid, hi, day, tid)))
             elif ctype == "not_consecutive" and a is not None and b is not None:
                 b_h = set(h for sid, h, _, _, _, _ in items if sid == b)
                 for sid, h, aid, hi, tid, t in items:
                     if sid == a and ((h - 1) in b_h or (h + 1) in b_h):
-                        offenders.append((PED_NOT_CONSECUTIVE_PENALTY * w, "ped",
-                                          (aid, hi, ctype, day)))
+                        offenders.append((PED_NOT_CONSECUTIVE_PENALTY * w, "ped_other",
+                                          (aid, hi, day, tid)))
             elif ctype == "min_gap" and a is not None:
                 b_eff = b if b is not None else a
                 req_gap = n if n is not None else 0
-                a_l = [(h, aid, hi) for sid, h, aid, hi, tid, t in items if sid == a]
+                a_l = [(h, aid, hi, tid) for sid, h, aid, hi, tid, t in items if sid == a]
                 b_hh = [h for sid, h, _, _, _, _ in items if sid == b_eff]
-                for h, aid, hi in a_l:
+                for h, aid, hi, tid in a_l:
                     for hb in b_hh:
                         if b_eff == a and hb == h:
                             continue
                         sep = abs(h - hb) - 1
                         if (req_gap == 0 and sep != 0) or (req_gap > 0 and sep < req_gap):
-                            offenders.append((PED_MIN_GAP_PENALTY * w, "ped",
-                                              (aid, hi, ctype, day)))
+                            offenders.append((PED_MIN_GAP_PENALTY * w, "ped_other",
+                                              (aid, hi, day, tid)))
                             break
 
     # ---- balance offenders (per class, Sun–Thu spread > tolerance) ----
@@ -702,6 +725,14 @@ def _mutate_priority(schedule, timeslot_ids, lookups, data, sync_groups=None):
             offenders.append(((spread - BALANCE_TOLERANCE) * BALANCE_PENALTY_PER_HOUR,
                               "balance", gid))
 
+    # ---- teacher-availability offenders ('cannot teach' hard rows) ----
+    for (gid, day), items in gd.items():
+        for sid, h, aid, hi, tid, t in items:
+            c = constraint_by_teacher_timeslot.get((tid, t))
+            if c is not None and c["constraint_type"] == "hard":
+                offenders.append((TEACHER_HARD_CONSTRAINT_PENALTY, "avail",
+                                  (aid, hi, day, tid)))
+
     if not offenders:
         _mutate(schedule, timeslot_ids, sync_groups=sync_groups)
         return
@@ -712,14 +743,6 @@ def _mutate_priority(schedule, timeslot_ids, lookups, data, sync_groups=None):
     # ---- balance move: teacher-aware, heavy day -> light day ----
     if kind == "balance":
         gid = payload
-        blocked = {(c["teacher_id"], c["timeslot_id"])
-                   for c in data.get("teacher_constraints", [])
-                   if c.get("constraint_type") == "hard"}
-        teacher_busy = set()
-        for ta in data["teacher_assignments"]:
-            for t in schedule[ta["id"]]:
-                teacher_busy.add((ta["teacher_id"], t))
-
         day_lessons, class_occupied = {}, set()
         for (g, day), items in gd.items():
             if g != gid or day == FRIDAY:
@@ -729,34 +752,50 @@ def _mutate_priority(schedule, timeslot_ids, lookups, data, sync_groups=None):
                 class_occupied.add(t)
         if len(day_lessons) < 2:
             _mutate(schedule, timeslot_ids, sync_groups=sync_groups); return
-
         light = min(day_lessons, key=lambda d: len(day_lessons[d]))
         heavy = max(day_lessons, key=lambda d: len(day_lessons[d]))
-        light_slots = [t for t in slots_by_day.get(light, []) if t not in class_occupied]
         movers = day_lessons[heavy][:]
         random.shuffle(movers)
         for aid, hi, tid in movers:
             if sync_groups and any(aid in ids for ids in sync_groups.values()):
                 continue
-            cands = [t for t in light_slots
-                     if (tid, t) not in teacher_busy and (tid, t) not in blocked]
-            if cands:
-                schedule[aid][hi] = random.choice(cands)
+            new_slot = _free_teacher_slot(schedule, data, timeslot_by_id, aid, tid,
+                                          slots_by_day.get(light, []), class_occupied)
+            if new_slot is not None:
+                schedule[aid][hi] = new_slot
                 return
         _mutate(schedule, timeslot_ids, sync_groups=sync_groups); return
 
-    # ---- pedagogical move (unchanged) ----
-    a_id, h_idx, ctype, day = payload
+    # ---- single-lesson moves (ped + availability), all teacher-aware ----
+    a_id, h_idx, day, tid = payload
     if sync_groups and any(a_id in ids for ids in sync_groups.values()):
         _mutate(schedule, timeslot_ids, sync_groups=sync_groups)
         return
-    if ctype == "morning_only" and morning_slots:
-        new_slot = random.choice(morning_slots)
-    elif ctype == "max_per_day":
-        other = [t for t in timeslot_ids if timeslot_by_id[t]["day_of_week"] != day]
-        new_slot = random.choice(other) if other else random.choice(timeslot_ids)
+
+    # class-occupied slots (avoid clashing the class with itself)
+    gid_of = requirement_by_id[
+        {ta["id"]: ta for ta in data["teacher_assignments"]}[a_id]["cur_requirement_id"]
+    ]["student_group_id"]
+    class_occupied = set()
+    for (g, d), items in gd.items():
+        if g == gid_of:
+            for sid, h, aid, hi, t_tid, t in items:
+                class_occupied.add(t)
+
+    if kind == "ped_morning":
+        pool = morning_slots
+    elif kind in ("ped_maxday", "avail"):
+        # move to a DIFFERENT day (for max_per_day) / anywhere the teacher is free
+        pool = [t for t in timeslot_ids if timeslot_by_id[t]["day_of_week"] != day] \
+            if kind == "ped_maxday" else list(timeslot_ids)
     else:
-        new_slot = random.choice(timeslot_ids)
+        pool = list(timeslot_ids)
+
+    new_slot = _free_teacher_slot(schedule, data, timeslot_by_id, a_id, tid,
+                                  pool, class_occupied)
+    if new_slot is None:
+        _mutate(schedule, timeslot_ids, sync_groups=sync_groups)
+        return
     schedule[a_id][h_idx] = new_slot
 
 # ---------------------------------------------------------------------------
