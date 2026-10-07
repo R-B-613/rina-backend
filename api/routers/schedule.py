@@ -14,6 +14,7 @@ from api.schedule_db import (
 )
 from api.edit_db import preview_violations, save_run_entries
 from api.run_snapshot import run_exists
+from api.settings_status import settings_status
 from api.schemas import ScheduleEditRequest
 
 router = APIRouter(prefix="/schedule", tags=["schedule"])
@@ -46,6 +47,11 @@ def publish_current(admin: dict = Depends(get_current_admin)):
         )
     publish_run(run["id"])
     return {"detail": "published", "run_id": run["id"]}
+
+@router.get("/settings-status")
+def current_settings_status(admin: dict = Depends(get_current_admin)):
+    """Do today's settings still match those the current / published run was generated from?"""
+    return settings_status()
 
 @router.get("/violations")
 def current_violations(admin: dict = Depends(get_current_admin)):
