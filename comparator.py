@@ -15,7 +15,7 @@ save_and_select_best_result(results), with no duplicated logic.
 from data_access import save_schedule_run, mark_run_as_selected
 
 
-def save_and_select_best_result(results: list) -> dict:
+def save_and_select_best_result(results: list, config_snapshot: str = None) -> dict:
     """
     Parameters
     ----------
@@ -63,6 +63,7 @@ def save_and_select_best_result(results: list) -> dict:
             score=result["score"],
             schedule_entries=result["schedule_entries"],
             violations=result.get("violations"),
+            config_snapshot=config_snapshot,
         )
         saved_run_ids[result["algorithm"]] = run_id
 
