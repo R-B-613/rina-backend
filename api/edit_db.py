@@ -8,6 +8,7 @@ violations/score shown while editing match what the algorithms report.
 from psycopg2.extras import Json
 
 from data_access import get_db_connection, fetch_all_data
+from api.run_snapshot import get_run_snapshot_data
 from scoring_violations import score_genetic_schedule_with_violations
 
 
@@ -61,9 +62,16 @@ def _entries_to_schedule(entries, data):
     return schedule
 
 
-def preview_violations(entries):
+def _data_for_run(run_id):
+    """The settings a run is scored against: ITS OWN snapshot, so editing an old run is
+    judged by the rules it was made under. Live settings only when there is no snapshot."""
+    data = get_run_snapshot_data(run_id) if run_id is not None else None
+    return data if data is not None else fetch_all_data()
+
+
+def preview_violations(entries, run_id=None):
     """Score a proposed schedule WITHOUT saving. Returns (score, violations)."""
-    data = fetch_all_data()
+    data = _data_for_run(run_id)
     lookups = build_lookups(data)
     schedule = _entries_to_schedule(entries, data)
     return score_genetic_schedule_with_violations(schedule, data, lookups)
@@ -76,7 +84,7 @@ def save_run_entries(run_id, entries):
     (score, violations).
     entries: [{tea_assignment_id, timeslot_id, room_id}, ...]
     """
-    data = fetch_all_data()
+    data = _data_for_run(run_id)
     lookups = build_lookups(data)
     schedule = _entries_to_schedule(entries, data)
     score, violations = score_genetic_schedule_with_violations(schedule, data, lookups)
