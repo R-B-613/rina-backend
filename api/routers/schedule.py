@@ -13,6 +13,7 @@ from api.schedule_db import (
     publish_run,
 )
 from api.edit_db import preview_violations, save_run_entries
+from api.run_snapshot import run_exists
 from api.schemas import ScheduleEditRequest
 
 router = APIRouter(prefix="/schedule", tags=["schedule"])
@@ -61,9 +62,16 @@ def current_violations(admin: dict = Depends(get_current_admin)):
 def preview_schedule_violations(payload: ScheduleEditRequest, admin: dict = Depends(get_current_admin)):
     """Score a proposed (unsaved) schedule and return its violations."""
     entries = [e.model_dump() for e in payload.entries]
-    score, violations = preview_violations(entries)
+    current = get_current_run()
+    score, violations = preview_violations(entries, run_id=current["id"] if current else None)
     return {"score": score, "violations": violations}
 
+@router.get("/run/{run_id}/entries")
+def run_entries(run_id: int, admin: dict = Depends(get_current_admin)):
+    """Lessons of ANY saved run (history viewer), resolved from that run's own settings snapshot."""
+    if not run_exists(run_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule run not found")
+    return {"entries": get_schedule_entries(run_id)}
 
 @router.put("/run/{run_id}/entries")
 def save_schedule_edits(run_id: int, payload: ScheduleEditRequest, admin: dict = Depends(get_current_admin)):
