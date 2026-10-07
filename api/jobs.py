@@ -41,6 +41,7 @@ import random
 from data_access import fetch_all_data
 from performance import measure_performance
 from comparator import save_and_select_best_result
+from snapshot import safe_make_config_snapshot
 from csp.solver import run_csp
 from hill_climbing.solver import run_hill_climbing
 from genetic.solver import run_genetic
@@ -94,6 +95,7 @@ def run_full_pipeline() -> dict:
     as-is on purpose rather than silently "fixing" the measurement.
     """
     data = fetch_all_data()
+    snapshot = safe_make_config_snapshot(data)
 
     results = []
     metrics = {}
@@ -107,7 +109,7 @@ def run_full_pipeline() -> dict:
             "peak_memory_mb": perf["peak_memory_mb"],
         }
 
-    comparison = save_and_select_best_result(results)
+    comparison = save_and_select_best_result(results, config_snapshot=snapshot)
     return {"comparison": comparison, "metrics": metrics}
 
 
@@ -198,6 +200,7 @@ def run_memetic_pipeline() -> dict:
     hill-climbing on every child). Saves the memetic result as the current schedule.
     """
     data = fetch_all_data()
+    snapshot = safe_make_config_snapshot(data)
 
     seed, _csp_result = get_balanced_csp_seed(data, max_spread=3)
     seed_kind = "balanced_csp"
@@ -214,7 +217,7 @@ def run_memetic_pipeline() -> dict:
     )
     print(f"[pipeline] seed_score={result.get('seed_score')} -> final={result.get('score')}", flush=True)
 
-    comparison = save_and_select_best_result([result])
+    comparison = save_and_select_best_result([result], config_snapshot=snapshot)
 
     return {
         "comparison": comparison,
