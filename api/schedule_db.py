@@ -6,6 +6,7 @@ Read-only queries for the current + published timetable.
 from psycopg2.extras import RealDictCursor
 
 from data_access import get_db_connection
+from api.run_snapshot import entries_from_snapshot, get_run_snapshot_data
 
 
 def get_current_run():
@@ -58,7 +59,7 @@ def publish_run(run_id: int):
         conn.close()
 
 
-def get_schedule_entries(run_id: int, teacher_id: int = None):
+def _get_schedule_entries_live(run_id: int, teacher_id: int = None):
     conn = get_db_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -97,3 +98,10 @@ def get_schedule_entries(run_id: int, teacher_id: int = None):
             return cursor.fetchall()
     finally:
         conn.close()
+
+def get_schedule_entries(run_id: int, teacher_id: int = None):
+    """Lessons of a run (optionally one teacher's), with names resolved from the run's own snapshot."""
+    data = get_run_snapshot_data(run_id)
+    if data is None:                      # run saved before snapshots existed and not backfilled
+        return _get_schedule_entries_live(run_id, teacher_id)
+    return entries_from_snapshot(run_id, data, teacher_id)
