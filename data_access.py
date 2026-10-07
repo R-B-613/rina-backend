@@ -116,7 +116,7 @@ def fetch_all_data():
 
             cursor.execute("""
                 SELECT id, first_name, last_name, min_hours, max_hours,
-                       is_admin, email
+                       is_admin, email, teacher_color
                 FROM teachers
                 ORDER BY id;
             """)
@@ -214,7 +214,7 @@ def mark_run_as_selected(run_id: int):
         conn.close()
 
 
-def save_schedule_run(algorithm: str, score: float, schedule_entries: list, violations: list = None):
+def save_schedule_run(algorithm: str, score: float, schedule_entries: list, violations: list = None, config_snapshot: str = None):
     """
     Inserts a new row into schedule_runs (with the given algorithm name and
     score), then inserts all schedule_entries into the schedule table,
@@ -234,11 +234,11 @@ def save_schedule_run(algorithm: str, score: float, schedule_entries: list, viol
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO schedule_runs (algorithm, score, violations)
-                VALUES (%s, %s, %s)
+                INSERT INTO schedule_runs (algorithm, score, violations, config_snapshot)
+                VALUES (%s, %s, %s, %s::jsonb)
                 RETURNING id;
                 """,
-                (algorithm, score, Json(violations) if violations is not None else None),
+                (algorithm, score, Json(violations) if violations is not None else None, config_snapshot),
             )
             run_id = cursor.fetchone()[0]
 
